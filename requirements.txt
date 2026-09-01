@@ -1,0 +1,31 @@
+# ============================================================================== 
+# Project Dependencies: Saudi FMCG Price Intelligence Pipeline
+# Core Stack: Python 3.11+
+# Categories:
+#   - Networking & Extraction: requests, urllib3
+#   - Data Processing & Validation: pandas, rapidfuzz, pydantic
+#   - Database & ORM: SQLAlchemy, psycopg2-binary
+#   - Environment Configuration: python-dotenv
+# ============================================================================== 
+
+pandas>=2.2.0
+openpyxl>=3.1.0
+numpy>=1.26.0
+psycopg2-binary>=2.9.9
+python-dotenv>=1.0.1
+requests>=2.32.0
+urllib3>=2.2.0
+sqlalchemy>=2.0.0
+beautifulsoup4>=4.0.0
+lxml>=5.0.0
+pydantic>=2.7.0
+curl-cffi>=0.7.0
+pytest>=8.0.0
+
+# Optional advanced NLP / matching tools
+rapidfuzz>=3.0.0
+python-Levenshtein>=0.25.0
+
+
+# Install dependencies with the same Python interpreter used to run the project:
+# py -m pip install -r requirements.txt
