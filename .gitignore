@@ -5,13 +5,3 @@
 __pycache__/
 *.pyc
 .DS_Store
-
-# Raw data (all stores) - keep folder via .gitkeep, exclude actual data
-data/raw/**/*.json
-data/raw/**/*.csv
-!data/raw/**/.gitkeep
-
-# Processed data (all stores) - same rule
-data/processed/**/*.json
-data/processed/**/*.csv
-!data/processed/**/.gitkeep
