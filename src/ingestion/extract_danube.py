@@ -4,11 +4,6 @@ Pulls ALL products (full pagination, no limit) across the 3 target
 categories EXACTLY as returned by the API, with NO cleaning, NO brand
 parsing, NO size parsing. This is the immutable raw snapshot.
 
-The only field dropped is "inventory_modifiers": it is an internal
-operational blob (~17KB per record, ~80% of total record size) with
-zero analytical value for pricing/brand work, so keeping it would
-bloat the raw snapshot ~5x for no benefit.
-
 Output: data/raw/stores/danube/danube_raw_<timestamp>.json
 
 Run transform_danube.py afterwards to produce the cleaned dataset.
@@ -18,6 +13,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import Counter
 from pathlib import Path
 
 import requests
@@ -35,9 +31,6 @@ CATEGORIES = {
     "dairy": "الأقسام > منتجات الألبان والبيض",
     "beverages": "الأقسام > الماء و المشروبات",
 }
-
-# حقول ضخمة عديمة الفائدة التحليلية نستثنيها من اللقطة الخام لتوفير المساحة
-DROP_FIELDS = ["inventory_modifiers"]
 
 
 def project_root() -> Path:
@@ -100,6 +93,55 @@ def fetch_page(taxon_value: str, page: int) -> tuple[list[dict], int]:
     return result.get("hits") or [], result.get("nbPages", 0)
 
 
+def summarize_inventory_modifiers(hit: dict) -> None:
+    """Derives a representative real price/sale-state from the
+    per-branch inventory_modifiers blob via majority vote, then drops
+    the raw blob.
+
+    Rationale: Makkah branches are a known minority exception that
+    carry no discount, while the online channel and the majority of
+    other branches DO carry the active promotion. The most frequent
+    (price, on_sale, savings_tag) combination across branches is
+    therefore treated as the representative/real price.
+    """
+    modifiers = hit.get("inventory_modifiers")
+
+    if not modifiers or not isinstance(modifiers, dict):
+        hit["real_price"] = hit.get("price")
+        hit["real_original_price"] = hit.get("original_price")
+        hit["real_on_sale"] = hit.get("on_sale", False)
+        hit["real_savings_tag"] = None
+        hit["branch_price_variance"] = False
+        hit.pop("inventory_modifiers", None)
+        return
+
+    combos = [
+        (entry.get("price"), entry.get("original_price"), bool(entry.get("on_sale")), entry.get("savings_tag"))
+        for entry in modifiers.values()
+        if isinstance(entry, dict) and entry.get("price") is not None
+    ]
+
+    if not combos:
+        hit["real_price"] = hit.get("price")
+        hit["real_original_price"] = hit.get("original_price")
+        hit["real_on_sale"] = hit.get("on_sale", False)
+        hit["real_savings_tag"] = None
+        hit["branch_price_variance"] = False
+        hit.pop("inventory_modifiers", None)
+        return
+
+    most_common_combo, _count = Counter(combos).most_common(1)[0]
+    real_price, real_original_price, real_on_sale, real_savings_tag = most_common_combo
+
+    hit["real_price"] = float(real_price) if real_price is not None else None
+    hit["real_original_price"] = float(real_original_price) if real_original_price is not None else None
+    hit["real_on_sale"] = real_on_sale
+    hit["real_savings_tag"] = real_savings_tag
+    hit["branch_price_variance"] = len(set(combos)) > 1
+
+    hit.pop("inventory_modifiers", None)
+
+
 def fetch_category_raw(category_key: str, taxon_value: str) -> list[dict]:
     print(f"\n[{category_key}] Fetching raw hits from Algolia...")
 
@@ -113,8 +155,7 @@ def fetch_category_raw(category_key: str, taxon_value: str) -> list[dict]:
             break
         for hit in hits:
             hit["_category_key"] = category_key
-            for field in DROP_FIELDS:
-                hit.pop(field, None)
+            summarize_inventory_modifiers(hit)
         all_hits.extend(hits)
         print(f"  page {page + 1}/{nb_pages}: {len(hits)} hits (total: {len(all_hits)})")
         page += 1

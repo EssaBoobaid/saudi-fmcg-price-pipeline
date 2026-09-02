@@ -9,6 +9,16 @@ Output: data/processed/stores/danube/danube_clean_<timestamp>.json
 
 Re-run this file any time the cleaning logic (brand list, unit patterns,
 discount rules) changes -- NO network calls, NO re-scraping needed.
+
+PRICING NOTE:
+This transform reads "real_price" / "real_original_price" (derived by
+extract_danube_raw.py via majority vote across Danube's per-branch
+inventory_modifiers), NOT the top-level "price" / "original_price"
+fields. The top-level fields can reflect a Makkah-only branch price
+(which is often the one branch WITHOUT the active discount), while
+"real_price" reflects the online + majority-branch price, which DOES
+carry the active promotion. Falls back to the top-level fields if
+"real_price" is missing (e.g. for older raw snapshots).
 """
 
 from __future__ import annotations
@@ -20,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
 
 KNOWN_BRANDS = [
     "Florida's Natural", "The Ginger People", "Al Qasim Produce",
@@ -47,7 +58,9 @@ KNOWN_BRANDS = [
 ]
 KNOWN_BRANDS_SORTED = sorted(KNOWN_BRANDS, key=len, reverse=True)
 
+
 UNIT_PATTERN = r'(ml|milliliter|ltr|l|liter|litre|kg|kilogram|g|gm|gr|gram|pcs|pack|oz|ounce)'
+
 
 PATTERN_QTY_FIRST = re.compile(
     rf'(\d+)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*{UNIT_PATTERN}\b', re.IGNORECASE,
@@ -162,8 +175,23 @@ def transform(df: pd.DataFrame) -> pd.DataFrame:
     out["store"] = "Danube Online"
     out["category"] = df.get("_category_key")
 
-    price = df.get("price").apply(safe_float)
-    original_price = df.get("original_price").apply(safe_float)
+    # Prefer the corrected "real_price"/"real_original_price" fields
+    # (majority-vote across branches, excludes Makkah-only outlier
+    # pricing). Fall back to the raw top-level fields if unavailable.
+    if "real_price" in df.columns:
+        price = df["real_price"].apply(safe_float).where(
+            df["real_price"].notna(), df.get("price").apply(safe_float)
+        )
+    else:
+        price = df.get("price").apply(safe_float)
+
+    if "real_original_price" in df.columns:
+        original_price = df["real_original_price"].apply(safe_float).where(
+            df["real_original_price"].notna(), df.get("original_price").apply(safe_float)
+        )
+    else:
+        original_price = df.get("original_price").apply(safe_float)
+
     out["price"] = price
     out["regular_price"] = [
         op if op and op > (p or 0) else p
@@ -235,8 +263,10 @@ def transform_danube() -> pd.DataFrame:
 
     brands_found = clean_df["brand"].notna().sum()
     sizes_found = clean_df["size"].notna().sum()
+    deals_found = (clean_df["discount"] > 0).sum()
     print(f"  Brands extracted: {brands_found}/{len(clean_df)} ({brands_found/len(clean_df)*100:.1f}%)")
     print(f"  Sizes extracted: {sizes_found}/{len(clean_df)} ({sizes_found/len(clean_df)*100:.1f}%)")
+    print(f"  Products on discount: {deals_found}/{len(clean_df)} ({deals_found/len(clean_df)*100:.1f}%)")
     print(f"  File: {path}")
 
     return clean_df
