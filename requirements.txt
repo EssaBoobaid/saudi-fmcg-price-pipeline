@@ -29,3 +29,4 @@ python-Levenshtein>=0.25.0
 
 # Install dependencies with the same Python interpreter used to run the project:
 # py -m pip install -r requirements.txt
+# macbook: python3 -m pip install -r requirements.txt

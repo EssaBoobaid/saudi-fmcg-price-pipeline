@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS Fact_Official_Benchmarks (
 );
 
 INSERT INTO Dim_Stores (store_name)
-VALUES ('Tamimi Markets'), ('Amazon'), ('Danube')
+VALUES ('Tamimi Markets'), ('Banda'), ('Danube')
 ON CONFLICT (store_name) DO NOTHING;
 
 INSERT INTO Dim_Location (city_name)

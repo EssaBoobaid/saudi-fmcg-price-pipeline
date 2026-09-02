@@ -1,6 +1,6 @@
 # Saudi FMCG Price Pipeline
 
-مشروع ETL لفهرسة وأسعار السلع الاستهلاكية في السوق السعودي، مع جمع البيانات من متاجر مختلفة مثل Tamimi وAmazon وDanube، وتنظيفها، ومطابقتها بالباركود، ثم تحميلها إلى قاعدة بيانات PostgreSQL.
+مشروع ETL لفهرسة وأسعار السلع الاستهلاكية في السوق السعودي، مع جمع البيانات من متاجر مختلفة مثل Tamimi وBanda وDanube، وتنظيفها، ومطابقتها بالباركود، ثم تحميلها إلى قاعدة بيانات PostgreSQL.
 
 ## هدف المشروع
 
@@ -44,7 +44,7 @@
 
 ### كل عضو يحمل متجرًا محددًا
 
-- Amazon Team
+- Banda Team
 - Tamimi Team
 - Danube Team
 
@@ -57,9 +57,9 @@
 
 ## مسؤوليات كل متجر
 
-### Amazon
-- استخراج البيانات الخام من Amazon
-- حفظها في data/raw/stores/amazon
+### Banda
+- استخراج البيانات الخام من Banda
+- حفظها في data/raw/stores/banda
 - إنشاء sample_5_per_category.json
 - تأكيد جودة الحقول
 
@@ -105,7 +105,7 @@ python3 src/utils/generate_store_samples.py
 ### 1. Ingestion
 مجموعة سكربتات لجمع البيانات من مختلف المصارف/المتاجر، مثل:
 - tamimi.py
-- extract_amazon.py
+- extract_banda.py
 - nana.py
 
 كل سكربت مسؤول عن:
@@ -124,7 +124,7 @@ python -m src.crawlers.run_all_crawlers
 وتحفظ النتائج في:
 - `data/raw/stores/tamimi_full_catalog.json`
 - `data/raw/stores/danube_full_catalog.json`
-- `data/raw/stores/amazon_full_catalog.json`
+- `data/raw/stores/banda_full_catalog.json`
 
 ### 3. Transformation
 تتولى هذه المرحلة:
