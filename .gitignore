@@ -1,8 +1,17 @@
+.env
 .env.*
-!.env
 !.env.example
 .venv/
 __pycache__/
 *.pyc
-data/raw/stores/danube/*.json
 .DS_Store
+
+# Raw data (all stores) - keep folder via .gitkeep, exclude actual data
+data/raw/**/*.json
+data/raw/**/*.csv
+!data/raw/**/.gitkeep
+
+# Processed data (all stores) - same rule
+data/processed/**/*.json
+data/processed/**/*.csv
+!data/processed/**/.gitkeep
