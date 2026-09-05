@@ -3,14 +3,15 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections import Counter
 from datetime import datetime
 
 
 # ============================================================
-# PATHS
+# CONFIG / PATHS
 # ============================================================
 
-PROJECT_ROOT = os.path.dirname(
+ROOT = os.path.dirname(
     os.path.dirname(
         os.path.dirname(
             os.path.abspath(__file__)
@@ -19,7 +20,7 @@ PROJECT_ROOT = os.path.dirname(
 )
 
 INPUT_FILE = os.path.join(
-    PROJECT_ROOT,
+    ROOT,
     "data",
     "raw",
     "stores",
@@ -28,72 +29,101 @@ INPUT_FILE = os.path.join(
 )
 
 OUTPUT_DIR = os.path.join(
-    PROJECT_ROOT,
+    ROOT,
     "data",
     "processed",
     "stores",
     "bindawood",
 )
 
-OUTPUT_FILE = os.path.join(
+LATEST_OUTPUT_FILE = os.path.join(
     OUTPUT_DIR,
-    "bindawood_clean.json",
+    "bindawood_clean_latest.json",
+)
+
+CATEGORY_MAP = {
+    "fruits_vegetables": "fruits-vegetables",
+    "fruits-vegetables": "fruits-vegetables",
+    "dairy": "dairy",
+    "beverages": "beverages",
+    "water-beverages": "beverages",
+}
+
+KNOWN_BRANDS = [
+    "Florida's Natural", "The Ginger People", "Al Qasim Produce",
+    "Philippine Brand", "La Vache Qui Rit", "Solan de Cabras",
+    "The Three Cows", "Orient Gardens", "Cathedral City", "Philadelphia",
+    "Mountain Dew", "S.Pellegrino", "Vitamin Well", "Power Horse",
+    "Rude Health", "Driscoll's", "Martinelli", "Natureland", "Capri-Sun",
+    "Dr.Pepper", "Coca Cola", "Starbucks", "President", "Schweppes",
+    "Sun Blast", "Barbican", "Sunbulah", "Vitamizu", "Cofrutos",
+    "Heineken", "Code Red", "Cacaolat", "Victoria", "Al Rabie",
+    "Valbreso", "Rubicon", "Landana", "Actimel", "Belvoir", "Halwani",
+    "Danette", "Forsana", "Perrier", "Mirinda", "Activia", "Babybel",
+    "Beltion", "Mishkat", "Violife", "Almarai", "Al Safi", "Juhayna",
+    "Caesar", "Suntop", "Balade", "Puvana", "Saudia", "Twisst", "Berain",
+    "Lurpak", "Sprite", "Rockit", "Moussy", "Klasse", "Scotti", "Lipton",
+    "Rauch", "Nerve", "Sante", "Vimto", "Milaf", "Nadec", "Ultra",
+    "Pepsi", "Kraft", "Pinar", "Kinza", "Frico", "Yopro", "Safio",
+    "Fanta", "Koita", "Akoya", "Vinut", "Twist", "Hotly", "Orasi",
+    "Bonny", "Queen", "Monin", "Oatly", "Prime", "Pride", "Alpro",
+    "Spada", "Evian", "Regal", "Danao", "Luna", "Nova", "Dari", "RARE",
+    "Arwa", "Oska", "Rita", "Safa", "Kiri", "Puck", "Fifa", "Alsi",
+    "Goro", "Noug", "Arla", "Nada", "7 Up", "Rani", "Zoi", "OKF", "May",
+    "KDD", "Danube", "Original", "Rockstar", "Juicy", "Danya", "Shani",
+    "Legero", "Senac", "Disfruta", "Canada", "Anchor",
+    "A&W", "Acqua Panna", "ADY Elixirs", "Al Ain", "Al Bayan",
+    "Al Madinah", "Al Sawsan", "Al Tashilat", "Al-Amri", "Alaska",
+    "Algharbia Farms", "Aqua Verde", "Aquafina", "Ava", "B Cola",
+    "Bambini", "Barebells", "Baskin Robbins", "Beypazari", "Blonde 22K",
+    "Bowl & Basket", "Britvic", "Cadbury", "Calzetti", "Carl Jung",
+    "Carlsberg", "Cheestrings", "Chris Family", "Christis", "Chupa Chups",
+    "Cocomax", "Coconaut", "Cofique", "Cojo Cojo", "Corona", "Crush",
+    "Daisy", "Damas", "Danablu", "Dava", "Desperados", "Domty",
+    "Don Simon", "Dunkin'", "Ease", "El Capitán", "Elecio", "Elle & Vire",
+    "Ensure", "Entaj", "Espadafor", "Fakieh", "Farm Harvest", "Fever Tree",
+    "Fiji", "Fizzy Wizzy", "Flora", "FoodSaf", "Foody's",
+    "Foster Clark's", "Freshly", "Galaxy", "Gatorade", "Glebe Farm",
+    "Golden Chair", "Goya", "Graham's Family Dairy", "Granarolo",
+    "Granini", "Grante", "Hajdu", "Hamdard", "Hass To Be Hass",
+    "Hata Kosen", "Henri Willig", "Holsten", "Hotos",
+    "Isigny Sainte-Mère", "It's Water", "Ival", "Jam-E-Shirin",
+    "Jumi Jumi", "Jwod", "Kafy", "Kasih", "Kerrygold", "Kwality",
+    "La Tansa", "Lavi", "Leemo-1", "Life WTR", "Limolife", "Linda",
+    "Lite", "Mahou", "Maison Perrier", "Maxim's", "Mixa", "Mojan Farms",
+    "Moma", "Mondariz", "Monster", "Muller", "Naqa'a", "Naqwat Alnanaa",
+    "Nescafe", "Nestlé", "Nyssa", "Ocean Spray", "Originz",
+    "Perfectly Pressed", "Port Salut", "Pristine", "Rachel's", "Rahima",
+    "Rain", "Rainbow", "Raw Pressery", "Red Bull", "Robinsons", "Rudolfs",
+    "Saha", "Salik", "Sanpellegrino", "Sant Aniol", "Shahela",
+    "Slush Puppie", "Sobia Musbah khudary", "Souroti", "Star Soda",
+    "Sting", "Stream", "Suncola", "Tang", "Tango", "Tania", "Tessa",
+    "The Premium Harvest", "Tim Hortons", "Tono", "Towt", "Tropicana",
+    "UP2U", "Ursu", "VaiWai", "Vendôme", "Vinola", "Volvic", "Voss",
+    "Wadan", "Waw", "Wholesome Pantry", "Zamzam",
+]
+
+KNOWN_BRANDS_SORTED = sorted(
+    set(KNOWN_BRANDS),
+    key=len,
+    reverse=True,
 )
 
 
 # ============================================================
-# CATEGORY MAPPING
-# ============================================================
-
-CATEGORY_MAP = {
-    "fruits_vegetables": "fruits_vegetables",
-    "dairy": "dairy",
-    "beverages": "beverages",
-}
-
-
-# ============================================================
-# TEXT HELPERS
+# BASIC HELPERS
 # ============================================================
 
 def clean_text(value):
     if value is None:
         return None
 
-    value = str(value).strip()
+    value = " ".join(str(value).split()).strip()
+    return value or None
 
-    if not value:
-        return None
-
-    return value
-
-
-def normalize_text(value):
-    value = clean_text(value)
-
-    if not value:
-        return ""
-
-    value = value.lower()
-
-    value = value.replace("_", " ")
-    value = value.replace("-", " ")
-    value = value.replace("/", " ")
-
-    value = re.sub(r"\s+", " ", value)
-
-    return value.strip()
-
-
-# ============================================================
-# NUMBER HELPERS
-# ============================================================
 
 def to_float(value):
-    if value is None:
-        return None
-
-    if isinstance(value, bool):
+    if value is None or isinstance(value, bool):
         return None
 
     try:
@@ -102,430 +132,225 @@ def to_float(value):
         return None
 
 
+def normalize_spaces(text):
+    if not text:
+        return None
+
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+([,.;:!?)])", r"\1", text)
+    text = re.sub(r"([(])\s+", r"\1", text)
+    return text or None
+
+
 # ============================================================
-# BRAND EXTRACTION
+# BRAND / NAME CLEANING
 # ============================================================
 
-def extract_brand(product):
-    # 1. Direct API fields
-    brand_en = clean_text(product.get("brand_en"))
-    brand_ar = clean_text(product.get("brand_ar"))
-
-    if brand_en:
-        return brand_en
-
-    if brand_ar:
-        return brand_ar
-
-    # 2. Other possible API fields
-    for key in [
+def extract_brand(product, name_en):
+    for key in (
+        "brand_en",
+        "brand_ar",
         "brand",
         "brand_name",
         "manufacturer",
         "manufacturer_name",
-    ]:
+    ):
         value = clean_text(product.get(key))
-
         if value:
             return value
+
+    if not name_en:
+        return None
+
+    name_lower = name_en.casefold()
+
+    for brand in KNOWN_BRANDS_SORTED:
+        if name_lower.startswith(brand.casefold()):
+            return brand
 
     return None
 
 
+def remove_brand_from_name_en(name_en, brand):
+    if not name_en or not brand:
+        return name_en
+
+    pattern = rf"^\s*{re.escape(brand)}(?=\s|[-–—,:;/]|$)\s*"
+    return normalize_spaces(re.sub(pattern, "", name_en, flags=re.IGNORECASE))
+
+
+def remove_brand_from_name_ar(name_ar, brand):
+    """
+    لا نحذف العلامة من العربي إلا إذا كانت العلامة نفسها مكتوبة
+    بالحروف العربية داخل الاسم. لا نترجم أو نخمن اسم العلامة.
+    """
+    if not name_ar or not brand:
+        return name_ar
+
+    pattern = rf"^\s*{re.escape(brand)}(?=\s|[-–—,:;/]|$)\s*"
+    return normalize_spaces(re.sub(pattern, "", name_ar, flags=re.IGNORECASE))
+
+
+def remove_size_and_quantity(name):
+    """
+    Remove only explicit size/measurement and multipack expressions.
+    Does not remove descriptive wording such as '(Tray)' when it has
+    no numeric quantity.
+    """
+    if not name:
+        return name
+
+    number = r"[0-9٠-٩]+(?:[.,][0-9٠-٩]+)?"
+    unit = (
+        r"(?:ml|milliliter(?:s)?|millilitre(?:s)?|"
+        r"l|ltr|liter(?:s)?|litre(?:s)?|"
+        r"kg|kilogram(?:s)?|kilo(?:s)?|"
+        r"g|gm|gr|gram(?:s)?|mg|milligram(?:s)?|"
+        r"oz|ounce(?:s)?|"
+        r"مل|ملي(?:لتر)?|لتر|لترات|كجم|كغ|كغم|كيلو(?:غرام)?|"
+        r"غرام|جرام|غ|ملغ|مجم)"
+    )
+
+    # Examples: 3*6*125ml, 24 x 125 ml, 6×330ml.
+    multipack = (
+        rf"\b{number}\s*[x×*]\s*"
+        rf"(?:{number}\s*[x×*]\s*)*"
+        rf"{number}\s*{unit}\b"
+    )
+
+    # Examples: 700g, 150 g, ١٥٠غرام, 1.5 kg.
+    single_size = rf"\b{number}\s*{unit}\b"
+
+    # Examples: 6 pack, 12 bottles, 24 cans, ٦ عبوات, ١٢ حبة.
+    counted_packaging = (
+        rf"\b{number}\s*"
+        r"(?:pack(?:s)?|bottle(?:s)?|can(?:s)?|jar(?:s)?|"
+        r"piece(?:s)?|pcs?|pc|box(?:es)?|bag(?:s)?|"
+        r"عبوات?|زجاجات?|علب(?:ة)?|حبات?|قطع(?:ة)?)\b"
+    )
+
+    text = name
+    text = re.sub(multipack, " ", text, flags=re.IGNORECASE)
+    text = re.sub(single_size, " ", text, flags=re.IGNORECASE)
+    text = re.sub(counted_packaging, " ", text, flags=re.IGNORECASE)
+
+    # Remove separators left after measurement deletion only.
+    text = re.sub(r"\s*[-–—*/×x]\s*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^\s*[-–—*/×x]\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return normalize_spaces(text)
+
+
+def clean_display_names(name_ar, name_en, brand):
+    original_ar = name_ar
+    original_en = name_en
+
+    name_en = remove_brand_from_name_en(name_en, brand)
+    name_en = remove_size_and_quantity(name_en)
+
+    name_ar = remove_brand_from_name_ar(name_ar, brand)
+    name_ar = remove_size_and_quantity(name_ar)
+
+    # Never create an empty display name.
+    return (
+        name_ar or original_ar,
+        name_en or original_en,
+    )
+
+
 # ============================================================
-# UNIT NORMALIZATION
+# SIZE / QUANTITY
 # ============================================================
 
 def normalize_unit(unit):
     if not unit:
         return None
 
-    unit = normalize_text(unit)
+    unit = unit.casefold()
 
-    unit_map = {
-        "kg": "kg",
-        "kilo": "kg",
-        "kilos": "kg",
-        "kilogram": "kg",
-        "kilograms": "kg",
-        "kgram": "kg",
-
-        "g": "g",
-        "gram": "g",
-        "grams": "g",
-        "gm": "g",
-
-        "mg": "mg",
-        "milligram": "mg",
-        "milligrams": "mg",
-
-        "l": "l",
-        "liter": "l",
-        "litre": "l",
-        "liters": "l",
-        "litres": "l",
-
-        "ml": "ml",
-        "milliliter": "ml",
-        "millilitre": "ml",
-        "milliliters": "ml",
-        "millilitres": "ml",
-
-        "pc": "piece",
-        "pcs": "piece",
-        "piece": "piece",
-        "pieces": "piece",
-
-        "pack": "pack",
-        "packs": "pack",
-
-        "tray": "tray",
-        "trays": "tray",
-
-        "box": "box",
-        "boxes": "box",
-
-        "bottle": "bottle",
-        "bottles": "bottle",
-
-        "can": "can",
-        "cans": "can",
-
-        "jar": "jar",
-        "jars": "jar",
-
-        "bag": "bag",
-        "bags": "bag",
+    mapping = {
+        "milliliter": "ml", "milliliters": "ml",
+        "millilitre": "ml", "millilitres": "ml",
+        "ltr": "l", "liter": "l", "litre": "l",
+        "liters": "l", "litres": "l",
+        "kilogram": "kg", "kilograms": "kg",
+        "kilo": "kg", "kilos": "kg",
+        "gm": "g", "gr": "g", "gram": "g", "grams": "g",
+        "milligram": "mg", "milligrams": "mg",
     }
 
-    return unit_map.get(unit)
+    return mapping.get(unit, unit)
 
 
-# ============================================================
-# SIZE EXTRACTION FROM TEXT
-# ============================================================
-
-def extract_size_from_text(text):
-    """
-    Extract size from product name / URL.
-
-    Examples:
-        250g       -> 250, g
-        250-g      -> 250, g
-        1kg        -> 1, kg
-        1-kg       -> 1, kg
-        500ml      -> 500, ml
-        500-ml     -> 500, ml
-        1L         -> 1, l
-        1-l        -> 1, l
-    """
-
-    if not text:
-        return None, None
-
-    text = str(text).lower()
-
-    # Normalize separators only for matching
-    normalized = text.replace("_", "-")
-    normalized = re.sub(r"\s+", "-", normalized)
-
-    # More specific units first
-    patterns = [
-        (r"(\d+(?:\.\d+)?)\s*(?:kg|kilo|kgram)\b", "kg"),
-        (r"(\d+(?:\.\d+)?)\s*(?:g|gram|grams|gm)\b", "g"),
-        (r"(\d+(?:\.\d+)?)\s*(?:mg|milligram|milligrams)\b", "mg"),
-        (r"(\d+(?:\.\d+)?)\s*(?:ml|milliliter|millilitre)\b", "ml"),
-        (r"(\d+(?:\.\d+)?)\s*(?:l|liter|litre)\b", "l"),
+def extract_size_and_unit(name_en, name_ar, product):
+    texts = [
+        name_en,
+        name_ar,
+        clean_text(product.get("full_name_en")),
+        clean_text(product.get("full_name_ar")),
+        clean_text(product.get("name_en")),
+        clean_text(product.get("name_ar")),
+        clean_text(product.get("url_en")),
+        clean_text(product.get("url_ar")),
     ]
 
-    for pattern, unit in patterns:
-        match = re.search(pattern, text)
+    unit_pattern = (
+        r"(ml|milliliter|milliliters|millilitre|millilitres|"
+        r"ltr|liter|litre|liters|litres|"
+        r"kg|kilogram|kilograms|kilo|"
+        r"g|gm|gr|gram|grams|"
+        r"mg|milligram|milligrams|"
+        r"oz|ounce|ounces)"
+    )
 
-        if match:
-            return float(match.group(1)), unit
+    for text in texts:
+        if not text:
+            continue
 
-    # Handle forms where hyphen is between number and unit
-    patterns_hyphen = [
-        (r"(\d+(?:\.\d+)?)-?(?:kg|kilo|kgram)\b", "kg"),
-        (r"(\d+(?:\.\d+)?)-?(?:g|gram|grams|gm)\b", "g"),
-        (r"(\d+(?:\.\d+)?)-?(?:mg|milligram|milligrams)\b", "mg"),
-        (r"(\d+(?:\.\d+)?)-?(?:ml|milliliter|millilitre)\b", "ml"),
-        (r"(\d+(?:\.\d+)?)-?(?:l|liter|litre)\b", "l"),
-    ]
+        matches = re.findall(
+            rf"(\d+(?:\.\d+)?)\s*{unit_pattern}\b",
+            text,
+            flags=re.IGNORECASE,
+        )
 
-    for pattern, unit in patterns_hyphen:
-        match = re.search(pattern, normalized)
-
-        if match:
-            return float(match.group(1)), unit
+        if matches:
+            size, unit = matches[-1]
+            return float(size), normalize_unit(unit)
 
     return None, None
 
 
-# ============================================================
-# UNIT FROM PACKAGING WORD
-# ============================================================
-
-def extract_packaging_unit(text):
-    if not text:
-        return None
-
-    text = normalize_text(text)
-
-    packaging_patterns = [
-        (r"\bpieces?\b", "piece"),
-        (r"\bpcs?\b", "piece"),
-        (r"\bpacks?\b", "pack"),
-        (r"\btrays?\b", "tray"),
-        (r"\bbox(?:es)?\b", "box"),
-        (r"\bbags?\b", "bag"),
-        (r"\bbottles?\b", "bottle"),
-        (r"\bcans?\b", "can"),
-        (r"\bjars?\b", "jar"),
-    ]
-
-    for pattern, unit in packaging_patterns:
-        if re.search(pattern, text):
-            return unit
-
-    return None
-
-
-# ============================================================
-# QUANTITY EXTRACTION
-# ============================================================
-
-def extract_quantity(text, size=None, unit=None):
-    """
-    Extract quantity for products such as:
-
-        48 x 200 ml
-        48-star-200-ml
-        6 pack
-        12 bottles
-        1 pc
-    """
-
+def extract_quantity(text):
     if not text:
         return 1
 
-    text = str(text).lower()
+    text = text.lower()
 
-    # --------------------------------------------------------
-    # Case: 48 x 200 ml
-    # Case: 48-star-200-ml
-    # --------------------------------------------------------
-
-    multi_patterns = [
-        r"\b(\d+)\s*[x×]\s*\d+(?:\.\d+)?\s*(?:kg|g|mg|l|ml)\b",
-        r"\b(\d+)[-\s]*(?:star|pack|packs)[-\s]*\d+(?:\.\d+)?[-\s]*(?:kg|g|mg|l|ml)\b",
-    ]
-
-    for pattern in multi_patterns:
-        match = re.search(pattern, text)
-
-        if match:
-            quantity = int(match.group(1))
-
-            if quantity > 0:
-                return quantity
-
-    # --------------------------------------------------------
-    # Case: 6 pack / 6 packs
-    # --------------------------------------------------------
-
-    pack_match = re.search(
-        r"\b(\d+)\s*(?:pack|packs)\b",
+    match = re.search(
+        r"\b(\d+)\s*[x×*]\s*(\d+)\s*[x×*]\s*"
+        r"\d+(?:\.\d+)?\s*(?:kg|g|mg|l|ml)\b",
         text,
     )
+    if match:
+        return int(match.group(1)) * int(match.group(2))
 
-    if pack_match:
-        quantity = int(pack_match.group(1))
-
-        if quantity > 0:
-            return quantity
-
-    # --------------------------------------------------------
-    # Case: 12 bottles / 24 cans
-    # --------------------------------------------------------
-
-    container_match = re.search(
-        r"\b(\d+)\s*(?:bottles?|cans?|jars?|pieces?|pcs?|pc)\b",
+    match = re.search(
+        r"\b(\d+)\s*[x×*]\s*"
+        r"\d+(?:\.\d+)?\s*(?:kg|g|mg|l|ml)\b",
         text,
     )
+    if match:
+        return int(match.group(1))
 
-    if container_match:
-        quantity = int(container_match.group(1))
-
-        if quantity > 0:
-            return quantity
-
-    # --------------------------------------------------------
-    # Case: 1 pc
-    # --------------------------------------------------------
-
-    if unit == "piece":
-        pc_match = re.search(
-            r"\b(\d+)\s*(?:pc|pcs|piece|pieces)\b",
-            text,
-        )
-
-        if pc_match:
-            quantity = int(pc_match.group(1))
-
-            if quantity > 0:
-                return quantity
+    match = re.search(
+        r"\b(\d+)\s*(?:pack|packs|bottles?|cans?|jars?|pcs?|pieces?)\b",
+        text,
+    )
+    if match:
+        return int(match.group(1))
 
     return 1
-
-
-# ============================================================
-# WEIGHT FROM API
-# ============================================================
-
-def extract_api_weight(product):
-    """
-    Try to use Bindawood's own weight-related fields first.
-    """
-
-    possible_fields = [
-        "weight",
-        "weight_increment",
-        "size",
-        "total_size",
-    ]
-
-    for field in possible_fields:
-        value = product.get(field)
-
-        if value is None:
-            continue
-
-        # Numeric direct value
-        numeric_value = to_float(value)
-
-        if numeric_value is not None and numeric_value > 0:
-            return numeric_value
-
-        # String value such as "250g"
-        parsed_size, parsed_unit = extract_size_from_text(str(value))
-
-        if parsed_size is not None:
-            return parsed_size, parsed_unit
-
-    return None
-
-
-# ============================================================
-# SIZE + UNIT EXTRACTION
-# ============================================================
-
-def extract_size_and_unit(product):
-    name_en = clean_text(product.get("name_en"))
-    name_ar = clean_text(product.get("name_ar"))
-    url_en = clean_text(product.get("url_en"))
-    url_ar = clean_text(product.get("url_ar"))
-
-    # --------------------------------------------------------
-    # 1. Try API weight field
-    # --------------------------------------------------------
-
-    api_weight = extract_api_weight(product)
-
-    if isinstance(api_weight, tuple):
-        return api_weight
-
-    if api_weight is not None:
-        # If API gives a numeric weight, we still need unit.
-        # Use product text to identify it.
-        combined_text = " ".join(
-            value
-            for value in [
-                name_en,
-                name_ar,
-                url_en,
-                url_ar,
-            ]
-            if value
-        )
-
-        _, detected_unit = extract_size_from_text(combined_text)
-
-        if detected_unit:
-            return api_weight, detected_unit
-
-    # --------------------------------------------------------
-    # 2. Product name
-    # --------------------------------------------------------
-
-    for text in [
-        name_en,
-        name_ar,
-    ]:
-        size, unit = extract_size_from_text(text)
-
-        if size is not None:
-            return size, unit
-
-    # --------------------------------------------------------
-    # 3. URL
-    # --------------------------------------------------------
-
-    for text in [
-        url_en,
-        url_ar,
-    ]:
-        size, unit = extract_size_from_text(text)
-
-        if size is not None:
-            return size, unit
-
-    # --------------------------------------------------------
-    # 4. No measurable size found
-    # --------------------------------------------------------
-
-    return None, None
-
-
-# ============================================================
-# UNIT EXTRACTION
-# ============================================================
-
-def extract_unit(product, size, detected_unit):
-    if detected_unit:
-        return detected_unit
-
-    # Check raw unit fields
-    for key in [
-        "unit",
-        "unit_name",
-        "measurement_unit",
-    ]:
-        value = normalize_unit(product.get(key))
-
-        if value:
-            return value
-
-    # Check names and URLs for packaging
-    texts = [
-        product.get("name_en"),
-        product.get("name_ar"),
-        product.get("url_en"),
-        product.get("url_ar"),
-    ]
-
-    for text in texts:
-        unit = extract_packaging_unit(text)
-
-        if unit:
-            return unit
-
-    # If no size exists, many fresh products are sold as pieces
-    # but only use this as a fallback.
-    if size is None:
-        return "unit"
-
-    return None
 
 
 # ============================================================
@@ -533,480 +358,295 @@ def extract_unit(product, size, detected_unit):
 # ============================================================
 
 def calculate_discount(price, regular_price):
-    if price is None or regular_price is None:
-        return 0.0
-
-    if regular_price <= 0:
-        return 0.0
+    if price is None or regular_price is None or regular_price <= 0:
+        return None
 
     if regular_price <= price:
         return 0.0
 
-    discount = ((regular_price - price) / regular_price) * 100
+    return round((regular_price - price) / regular_price * 100, 2)
 
-    return round(discount, 2)
+
+def is_sale_modifier(modifier):
+    price = to_float(modifier.get("price"))
+    original_price = to_float(modifier.get("original_price"))
+
+    return (
+        modifier.get("on_sale") is True
+        or (
+            price is not None
+            and original_price is not None
+            and original_price > price
+        )
+    )
+
+
+def representative_price_from_modifiers(product):
+    modifiers = product.get("inventory_modifiers")
+
+    if not isinstance(modifiers, dict):
+        return None, None
+
+    records = [
+        item
+        for item in modifiers.values()
+        if isinstance(item, dict)
+        and to_float(item.get("price")) is not None
+        and item.get("available") is not False
+        and item.get("in_stock") is not False
+    ]
+
+    if not records:
+        return None, None
+
+    sale_records = [
+        item
+        for item in records
+        if is_sale_modifier(item)
+    ]
+
+    # Promotions are preferred: non-sale Makkah branches are ignored.
+    candidates = sale_records or records
+
+    states = [
+        (
+            to_float(item.get("price")),
+            to_float(item.get("original_price")),
+        )
+        for item in candidates
+    ]
+
+    price, original_price = Counter(states).most_common(1)[0][0]
+
+    return price, original_price
 
 
 def extract_prices(product):
-    price = to_float(product.get("price"))
+    # Prefer branch-level sale data from the raw snapshot.
+    price, original_price = representative_price_from_modifiers(product)
 
-    original_price = to_float(
-        product.get("original_price")
-    )
+    if price is None:
+        price = to_float(product.get("real_price"))
+        original_price = to_float(product.get("real_original_price"))
 
-    # Some APIs may have sale_price instead
-    sale_price = to_float(
-        product.get("sale_price")
-    )
+    if price is None:
+        price = to_float(product.get("price"))
+        original_price = to_float(product.get("original_price"))
 
-    if price is None and sale_price is not None:
-        price = sale_price
-
-    if original_price is None:
-        original_price = price
-
-    discount = calculate_discount(
-        price,
-        original_price,
+    regular_price = (
+        original_price
+        if original_price is not None and original_price > price
+        else price
     )
 
     return (
         price,
-        original_price,
-        discount,
+        regular_price,
+        calculate_discount(price, regular_price),
     )
 
 
 # ============================================================
-# URL
+# URL / IMAGE
 # ============================================================
 
 def build_url(product):
-    url_en = clean_text(product.get("url_en"))
-    url_ar = clean_text(product.get("url_ar"))
-
-    url = url_en or url_ar
+    url = clean_text(product.get("url_en")) or clean_text(product.get("url_ar"))
 
     if not url:
         return None
 
-    if url.startswith("http://") or url.startswith("https://"):
+    if url.startswith(("https://", "http://")):
         return url
 
-    if url.startswith("/"):
-        return "https://www.bindawood.sa" + url
+    return f"https://www.bindawood.sa{url if url.startswith('/') else '/' + url}"
 
-    return "https://www.bindawood.sa/" + url
-
-
-# ============================================================
-# IMAGE
-# ============================================================
 
 def extract_image(product):
-    possible_fields = [
-        "image",
-        "image_url",
-        "image_urls",
-        "images",
-        "images_url",
-    ]
+    image = product.get("image")
 
-    for field in possible_fields:
-        value = product.get(field)
+    if isinstance(image, str) and image.strip():
+        return image.strip()
 
-        if isinstance(value, str):
-            value = value.strip()
-
-            if value:
-                return value
+    for key in ("image_url", "image_urls", "images", "images_url"):
+        value = product.get(key)
 
         if isinstance(value, list) and value:
-            first = value[0]
+            value = value[0]
 
-            if isinstance(first, str):
-                return first
+        if isinstance(value, str) and value.strip():
+            return value.strip()
 
-            if isinstance(first, dict):
-                for key in [
-                    "url",
-                    "src",
-                    "image_url",
-                ]:
-                    image_url = first.get(key)
-
-                    if image_url:
-                        return image_url
+        if isinstance(value, dict):
+            for image_key in ("url", "src", "image_url"):
+                image = clean_text(value.get(image_key))
+                if image:
+                    return image
 
     return None
 
 
 # ============================================================
-# PRODUCT TRANSFORMATION
+# TRANSFORM
 # ============================================================
 
 def transform_product(product):
-    product_name_ar = clean_text(
-        product.get("name_ar")
+    original_name_ar = (
+        clean_text(product.get("full_name_ar"))
+        or clean_text(product.get("name_ar"))
     )
 
-    product_name_en = clean_text(
-        product.get("name_en")
+    original_name_en = (
+        clean_text(product.get("full_name_en"))
+        or clean_text(product.get("name_en"))
     )
 
-    category_raw = clean_text(
-        product.get("_category_key")
-    )
+    if not original_name_ar and not original_name_en:
+        return None
 
-    category = CATEGORY_MAP.get(
-        category_raw,
-        category_raw,
-    )
-
-    # --------------------------------------------------------
-    # Brand
-    # --------------------------------------------------------
-
-    brand = extract_brand(product)
-
-    # --------------------------------------------------------
-    # Price
-    # --------------------------------------------------------
-
-    price, regular_price, discount = extract_prices(
-        product
-    )
-
-    # --------------------------------------------------------
-    # Size / Unit
-    # --------------------------------------------------------
+    brand = extract_brand(product, original_name_en)
 
     size, detected_unit = extract_size_and_unit(
-        product
-    )
-
-    unit = extract_unit(
+        original_name_en,
+        original_name_ar,
         product,
-        size,
-        detected_unit,
     )
-
-    # --------------------------------------------------------
-    # Quantity
-    # --------------------------------------------------------
 
     combined_text = " ".join(
-        value
-        for value in [
-            product_name_en,
-            product_name_ar,
-            product.get("url_en"),
-            product.get("url_ar"),
-        ]
-        if value
+        text
+        for text in (
+            original_name_en,
+            original_name_ar,
+            clean_text(product.get("url_en")),
+            clean_text(product.get("url_ar")),
+        )
+        if text
     )
 
-    quantity = extract_quantity(
-        combined_text,
-        size=size,
-        unit=unit,
+    quantity = extract_quantity(combined_text)
+
+    product_name_ar, product_name_en = clean_display_names(
+        original_name_ar,
+        original_name_en,
+        brand,
     )
 
-    # --------------------------------------------------------
-    # Total Size
-    # --------------------------------------------------------
+    price, regular_price, discount = extract_prices(product)
 
-    total_size = None
-
-    if size is not None:
-        if quantity is not None and quantity > 0:
-            total_size = round(
-                size * quantity,
-                3,
-            )
-        else:
-            total_size = size
-
-    # --------------------------------------------------------
-    # URL / Image
-    # --------------------------------------------------------
-
-    url = build_url(product)
-
-    image = extract_image(product)
-
-    # --------------------------------------------------------
-    # Standardized output
-    # --------------------------------------------------------
+    if price is None:
+        return None
 
     return {
         "product_name_ar": product_name_ar,
         "product_name_en": product_name_en,
-        "store": "BinDawood Online",
-        "category": category,
+        "store": "Bindawood Online",
+        "category": CATEGORY_MAP.get(
+            clean_text(product.get("_category_key")),
+            clean_text(product.get("_category_key")),
+        ),
         "price": price,
         "regular_price": regular_price,
         "discount": discount,
         "brand": brand,
         "size": size,
-        "unit": unit,
+        "unit": detected_unit or "unit",
         "quantity": quantity,
-        "total_size": total_size,
-        "url": url,
-        "image": image,
+        "total_size": round(size * quantity, 3) if size is not None else None,
+        "url": build_url(product),
+        "image": extract_image(product),
     }
 
 
-# ============================================================
-# VALIDATION
-# ============================================================
+def load_raw_products():
+    if not os.path.exists(INPUT_FILE):
+        raise FileNotFoundError(f"Raw file not found:\n{INPUT_FILE}")
 
-def is_valid_product(product):
-    name_ar = product.get("product_name_ar")
-    name_en = product.get("product_name_en")
-    price = product.get("price")
+    with open(INPUT_FILE, "r", encoding="utf-8") as file:
+        raw_data = json.load(file)
 
-    if not name_ar and not name_en:
-        return False
+    hits = raw_data.get("hits") or []
 
-    if price is None:
-        return False
+    if not isinstance(hits, list):
+        raise ValueError("Expected a list under `hits` in the raw JSON file.")
 
-    return True
+    return hits
 
-
-# ============================================================
-# STATISTICS
-# ============================================================
-
-def print_statistics(products):
-    total = len(products)
-
-    if total == 0:
-        return
-
-    print()
-    print("=" * 70)
-    print("BINDAWOOD TRANSFORM STATISTICS")
-    print("=" * 70)
-
-    categories = {}
-
-    for product in products:
-        category = product.get("category")
-
-        if category:
-            categories[category] = (
-                categories.get(category, 0) + 1
-            )
-
-    print()
-    print("Category counts:")
-
-    for category, count in categories.items():
-        print(f"  {category}: {count}")
-
-    # --------------------------------------------------------
-    # Brand
-    # --------------------------------------------------------
-
-    brand_count = sum(
-        1
-        for product in products
-        if product.get("brand")
-    )
-
-    print()
-    print(
-        f"Brands extracted: {brand_count}/{total} "
-        f"({brand_count / total * 100:.1f}%)"
-    )
-
-    # --------------------------------------------------------
-    # Size
-    # --------------------------------------------------------
-
-    size_count = sum(
-        1
-        for product in products
-        if product.get("size") is not None
-    )
-
-    print(
-        f"Sizes extracted: {size_count}/{total} "
-        f"({size_count / total * 100:.1f}%)"
-    )
-
-    # --------------------------------------------------------
-    # Unit
-    # --------------------------------------------------------
-
-    unit_count = sum(
-        1
-        for product in products
-        if product.get("unit")
-    )
-
-    print(
-        f"Units extracted: {unit_count}/{total} "
-        f"({unit_count / total * 100:.1f}%)"
-    )
-
-    # --------------------------------------------------------
-    # Quantity
-    # --------------------------------------------------------
-
-    quantity_count = sum(
-        1
-        for product in products
-        if product.get("quantity") is not None
-    )
-
-    print(
-        f"Quantities extracted: {quantity_count}/{total} "
-        f"({quantity_count / total * 100:.1f}%)"
-    )
-
-    # --------------------------------------------------------
-    # Total size
-    # --------------------------------------------------------
-
-    total_size_count = sum(
-        1
-        for product in products
-        if product.get("total_size") is not None
-    )
-
-    print(
-        f"Total sizes calculated: {total_size_count}/{total} "
-        f"({total_size_count / total * 100:.1f}%)"
-    )
-
-    # --------------------------------------------------------
-    # Discounts
-    # --------------------------------------------------------
-
-    discount_count = sum(
-        1
-        for product in products
-        if product.get("discount", 0) > 0
-    )
-
-    print(
-        f"Products on discount: {discount_count}/{total} "
-        f"({discount_count / total * 100:.1f}%)"
-    )
-
-    print("=" * 70)
-
-
-# ============================================================
-# SAVE
-# ============================================================
 
 def save_processed_data(products):
-    os.makedirs(
-        OUTPUT_DIR,
-        exist_ok=True,
-    )
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    timestamp = datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
-    )
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+    result = {
+        "store": "Bindawood Online",
+        "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "categories": {
+            category: sum(
+                product.get("category") == category
+                for product in products
+            )
+            for category in ("fruits-vegetables", "dairy", "beverages")
+        },
+        "records_count": len(products),
+        "records": products,
+    }
 
     timestamped_file = os.path.join(
         OUTPUT_DIR,
         f"bindawood_clean_{timestamp}.json",
     )
 
-    with open(
-        OUTPUT_FILE,
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            products,
-            file,
-            ensure_ascii=False,
-            indent=2,
-        )
+    for output_file in (LATEST_OUTPUT_FILE, timestamped_file):
+        with open(output_file, "w", encoding="utf-8") as file:
+            json.dump(result, file, ensure_ascii=False, indent=2)
 
-    with open(
-        timestamped_file,
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            products,
-            file,
-            ensure_ascii=False,
-            indent=2,
-        )
+    return timestamped_file
 
-    print()
-    print("=" * 70)
-    print("BINDAWOOD TRANSFORM FINISHED")
-    print("=" * 70)
-    print(f"Clean products: {len(products)}")
-    print(f"Latest file: {OUTPUT_FILE}")
-    print(f"Timestamped file: {timestamped_file}")
-
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
-    print()
-    print("=" * 70)
+    print("=" * 60)
     print("STARTING BINDAWOOD TRANSFORM")
-    print("=" * 70)
+    print("=" * 60)
 
-    if not os.path.exists(INPUT_FILE):
-        print()
-        print("ERROR: Raw Bindawood file not found:")
-        print(INPUT_FILE)
-        return
-
-    with open(
-        INPUT_FILE,
-        "r",
-        encoding="utf-8",
-    ) as file:
-        raw_data = json.load(file)
-
-    raw_products = raw_data.get("hits", [])
-
-    print(
-        f"Loaded {len(raw_products)} raw products"
-    )
-
+    raw_products = load_raw_products()
     processed_products = []
 
-    for raw_product in raw_products:
-        try:
-            clean_product = transform_product(
-                raw_product
-            )
+    for product in raw_products:
+        if not isinstance(product, dict):
+            continue
 
-            if is_valid_product(clean_product):
-                processed_products.append(
-                    clean_product
-                )
+        try:
+            record = transform_product(product)
+
+            if record:
+                processed_products.append(record)
 
         except Exception as error:
-            print(
-                "WARNING: Failed to transform product:",
-                error,
-            )
+            print(f"WARNING: Failed to transform product: {error}")
 
-    print_statistics(
-        processed_products
+    output_file = save_processed_data(processed_products)
+
+    brands_found = sum(
+        product.get("brand") is not None
+        for product in processed_products
+    )
+    sizes_found = sum(
+        product.get("size") is not None
+        for product in processed_products
+    )
+    deals_found = sum(
+        (product.get("discount") or 0) > 0
+        for product in processed_products
     )
 
-    save_processed_data(
-        processed_products
-    )
+    print(f"Raw products: {len(raw_products)}")
+    print(f"Clean products: {len(processed_products)}")
+    print(f"Brands found: {brands_found}/{len(processed_products)}")
+    print(f"Sizes found: {sizes_found}/{len(processed_products)}")
+    print(f"Products on sale: {deals_found}/{len(processed_products)}")
+    print(f"Latest: {LATEST_OUTPUT_FILE}")
+    print(f"Timestamped: {output_file}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

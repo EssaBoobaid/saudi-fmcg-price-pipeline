@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import json
 import re
-from datetime import datetime, timezone
+import time
+from collections import Counter
 from pathlib import Path
 
 
@@ -27,412 +30,588 @@ OUTPUT_DIR = (
     / "tamimi"
 )
 
-OUTPUT_FILE = OUTPUT_DIR / "tamimi_clean_latest.json"
+LATEST_OUTPUT_FILE = OUTPUT_DIR / "tamimi_clean_latest.json"
 
 
 # ============================================================
-# HELPERS
+# BASIC HELPERS
 # ============================================================
+
+def clean_text(value):
+    if value is None:
+        return None
+
+    value = " ".join(str(value).split()).strip()
+    return value or None
+
 
 def safe_float(value):
-    """
-    Convert value to float safely.
-    """
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
 
     try:
         return float(value)
-    except (ValueError, TypeError):
+    except (TypeError, ValueError):
         return None
 
 
-def clean_text(value):
-    """
-    Clean text values.
-    """
-    if value is None:
+def normalize_unit(unit):
+    if not unit:
         return None
 
-    text = str(value).strip()
+    unit = str(unit).lower().strip()
 
-    return text if text else None
+    mapping = {
+        "kilogram": "kg",
+        "kilograms": "kg",
+        "kilo": "kg",
+        "gm": "g",
+        "gr": "g",
+        "gram": "g",
+        "grams": "g",
+        "milligram": "mg",
+        "milligrams": "mg",
+        "milliliter": "ml",
+        "milliliters": "ml",
+        "millilitre": "ml",
+        "millilitres": "ml",
+        "ltr": "l",
+        "liter": "l",
+        "litre": "l",
+        "liters": "l",
+        "litres": "l",
+    }
+
+    return mapping.get(unit, unit)
 
 
-def get_first_variant(product):
-    """
-    Get the first product variant.
-    """
-    variants = product.get("variants") or []
+# ============================================================
+# DISPLAY NAME CLEANING
+# ============================================================
 
-    if not variants:
+def tidy_name(text):
+    if not text:
         return None
 
-    return variants[0]
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s*-\s*$", "", text)
+    text = re.sub(r"^\s*-\s*", "", text)
+    text = re.sub(r"\(\s*\)", "", text)
+
+    return text.strip() or None
 
 
-def get_store_data(variant):
+def remove_brand_from_name(name, brand):
     """
-    Get the first store-specific record for the variant.
+    Remove the brand only when it appears at the beginning of the name.
     """
-    if not variant:
-        return None
+    if not name or not brand:
+        return name
 
-    store_data = variant.get("storeSpecificData") or []
+    pattern = rf"^\s*{re.escape(brand)}(?=\s|[-–—,:;/]|$)\s*"
 
-    if not store_data:
-        return None
+    return tidy_name(
+        re.sub(
+            pattern,
+            "",
+            name,
+            flags=re.IGNORECASE,
+        )
+    )
 
-    return store_data[0]
 
-
-def extract_size_and_unit(variant):
+def remove_size_and_quantity(name):
     """
-    Extract size and unit from the variant name.
+    Remove measurements and numeric pack formats only.
 
     Examples:
-        473Ml -> 473, ml
-        1.8Kg -> 1.8, kg
-        500G -> 500, g
-        1L -> 1, l
+        Nido Fortified Grow With Fiber Tin-400G
+        -> Nido Fortified Grow With Fiber Tin
+
+        Juice 24*125ml
+        -> Juice
+
+        Juice 3x6x125ml
+        -> Juice
     """
+    if not name:
+        return name
 
-    if not variant:
-        return None, None
+    number = r"\d+(?:\.\d+)?"
 
-    full_name = clean_text(variant.get("fullName"))
-    variant_name = clean_text(variant.get("name"))
+    unit = (
+        r"(?:kg|kilogram(?:s)?|kilo|"
+        r"g|gm|gr|gram(?:s)?|"
+        r"mg|milligram(?:s)?|"
+        r"ml|milliliter(?:s)?|millilitre(?:s)?|"
+        r"cl|"
+        r"l|ltr|liter(?:s)?|litre(?:s)?|"
+        r"oz|ounce(?:s)?)"
+    )
 
-    text = full_name or variant_name
+    multipack_pattern = (
+        rf"\b{number}\s*[x×*]\s*"
+        rf"(?:{number}\s*[x×*]\s*)*"
+        rf"{number}\s*{unit}\b"
+    )
+
+    size_pattern = rf"\b{number}\s*{unit}\b"
+
+    packaging_pattern = (
+        rf"\b{number}\s*"
+        r"(?:pack(?:s)?|bottle(?:s)?|can(?:s)?|jar(?:s)?|"
+        r"piece(?:s)?|pcs?|pc|box(?:es)?|bag(?:s)?)\b"
+    )
+
+    name = re.sub(
+        multipack_pattern,
+        " ",
+        name,
+        flags=re.IGNORECASE,
+    )
+
+    name = re.sub(
+        size_pattern,
+        " ",
+        name,
+        flags=re.IGNORECASE,
+    )
+
+    name = re.sub(
+        packaging_pattern,
+        " ",
+        name,
+        flags=re.IGNORECASE,
+    )
+
+    return tidy_name(name)
+
+
+def clean_display_name(name, brand):
+    """
+    Keep a readable fallback if cleaning accidentally removes all text.
+    """
+    original = name
+
+    name = remove_brand_from_name(name, brand)
+    name = remove_size_and_quantity(name)
+
+    return name or original
+
+
+# ============================================================
+# PRODUCT / VARIANT HELPERS
+# ============================================================
+
+def get_variants(product):
+    variants = product.get("variants") or []
+
+    if not isinstance(variants, list):
+        return []
+
+    return [
+        variant
+        for variant in variants
+        if isinstance(variant, dict)
+    ]
+
+
+def get_product_name(product, variant):
+    return (
+        clean_text(variant.get("fullName"))
+        or clean_text(variant.get("name"))
+        or clean_text(product.get("name"))
+        or clean_text(product.get("fullName"))
+    )
+
+
+def get_arabic_name(product, variant):
+    for source in (variant, product):
+        for key in (
+            "fullNameAr",
+            "fullNameAR",
+            "nameAr",
+            "nameAR",
+            "arabicName",
+            "full_name_ar",
+            "name_ar",
+        ):
+            value = clean_text(source.get(key))
+
+            if value:
+                return value
+
+    return None
+
+
+def get_brand(product):
+    brand = product.get("brand")
+
+    if isinstance(brand, dict):
+        return clean_text(brand.get("name"))
+
+    return clean_text(brand)
+
+
+# ============================================================
+# PRICE HELPERS
+# ============================================================
+
+def is_available(record):
+    if record.get("available") is False:
+        return False
+
+    if record.get("inStock") is False:
+        return False
+
+    if record.get("in_stock") is False:
+        return False
+
+    stock = safe_float(record.get("stock"))
+
+    return stock is None or stock > 0
+
+
+def is_sale(record):
+    discount = safe_float(record.get("discount")) or 0.0
+
+    if discount > 0:
+        return True
+
+    price = safe_float(record.get("price"))
+    original_price = safe_float(record.get("original_price"))
+
+    return (
+        price is not None
+        and original_price is not None
+        and original_price > price
+    )
+
+
+def choose_store_record(variant):
+    """
+    Prefer available records, then offer records, then choose the most
+    frequently repeated pricing combination.
+    """
+    store_data = variant.get("storeSpecificData") or []
+
+    records = [
+        record
+        for record in store_data
+        if isinstance(record, dict)
+        and safe_float(record.get("mrp")) is not None
+    ]
+
+    if not records:
+        return None
+
+    available_records = [
+        record
+        for record in records
+        if is_available(record)
+    ]
+
+    candidates = available_records or records
+
+    sale_records = [
+        record
+        for record in candidates
+        if is_sale(record)
+    ]
+
+    if sale_records:
+        candidates = sale_records
+
+    states = [
+        (
+            safe_float(record.get("mrp")),
+            safe_float(record.get("discount")) or 0.0,
+            safe_float(record.get("price")),
+        )
+        for record in candidates
+    ]
+
+    selected_state = Counter(states).most_common(1)[0][0]
+
+    for record in candidates:
+        state = (
+            safe_float(record.get("mrp")),
+            safe_float(record.get("discount")) or 0.0,
+            safe_float(record.get("price")),
+        )
+
+        if state == selected_state:
+            return record
+
+    return candidates[0]
+
+
+def get_price_data(store_record):
+    """
+    Tamimi discount is a fixed Saudi-riyal discount amount:
+    price = mrp - discount.
+    """
+    if not store_record:
+        return None, None, None
+
+    mrp = safe_float(store_record.get("mrp"))
+
+    if mrp is None or mrp <= 0:
+        return None, None, None
+
+    discount_amount = safe_float(
+        store_record.get("discount")
+    ) or 0.0
+
+    price = safe_float(store_record.get("price"))
+
+    if price is None:
+        price = mrp - discount_amount
+
+    price = max(round(price, 2), 0.0)
+    regular_price = round(mrp, 2)
+
+    discount_percent = (
+        round((regular_price - price) / regular_price * 100, 2)
+        if regular_price > price
+        else 0.0
+    )
+
+    return price, regular_price, discount_percent
+
+
+# ============================================================
+# SIZE / QUANTITY HELPERS
+# ============================================================
+
+def extract_size_and_unit(variant):
+    text = (
+        clean_text(variant.get("fullName"))
+        or clean_text(variant.get("name"))
+    )
 
     if not text:
         return None, None
 
-    # Search for number + unit
-    pattern = re.search(
-        r"(\d+(?:\.\d+)?)\s*(kg|g|mg|l|ml|cl|litre|liter|liters|litres)",
-        text.lower()
+    matches = re.findall(
+        r"(\d+(?:\.\d+)?)\s*"
+        r"(kg|kilogram|kilograms|kilo|"
+        r"g|gm|gr|gram|grams|"
+        r"mg|milligram|milligrams|"
+        r"ml|milliliter|milliliters|millilitre|millilitres|"
+        r"cl|l|ltr|liter|litre|liters|litres)\b",
+        text,
+        flags=re.IGNORECASE,
     )
 
-    if not pattern:
+    if not matches:
         return None, None
 
-    size = safe_float(pattern.group(1))
-    unit = pattern.group(2).lower()
+    size, unit = matches[-1]
 
-    # Normalize units
-    unit_mapping = {
-        "kilogram": "kg",
-        "kilograms": "kg",
-        "kg": "kg",
-        "g": "g",
-        "mg": "mg",
-        "l": "l",
-        "litre": "l",
-        "liter": "l",
-        "liters": "l",
-        "litres": "l",
-        "ml": "ml",
-        "cl": "cl",
-    }
-
-    unit = unit_mapping.get(unit, unit)
-
-    return size, unit
+    return safe_float(size), normalize_unit(unit)
 
 
-def calculate_price(mrp, discount):
-    """
-    Tamimi discount is a fixed SAR amount.
+def extract_quantity(variant):
+    text = (
+        clean_text(variant.get("fullName"))
+        or clean_text(variant.get("name"))
+        or ""
+    ).lower()
 
-    price = MRP - discount
-    """
+    match = re.search(
+        r"(\d+)\s*[x×*]\s*(\d+)\s*[x×*]\s*"
+        r"\d+(?:\.\d+)?\s*(?:kg|g|mg|l|ml|cl)\b",
+        text,
+    )
 
-    if mrp is None:
-        return None
+    if match:
+        return int(match.group(1)) * int(match.group(2))
 
-    if discount is None:
-        discount = 0.0
+    match = re.search(
+        r"(\d+)\s*[x×*]\s*"
+        r"\d+(?:\.\d+)?\s*(?:kg|g|mg|l|ml|cl)\b",
+        text,
+    )
 
-    price = mrp - discount
+    if match:
+        return int(match.group(1))
 
-    # Avoid negative prices caused by bad data
-    if price < 0:
-        price = 0.0
+    match = re.search(
+        r"\b(\d+)\s*(?:pack|packs|bottles?|cans?|jars?|pcs?|pieces?)\b",
+        text,
+    )
 
-    return round(price, 2)
+    if match:
+        return int(match.group(1))
+
+    return 1
 
 
-def calculate_total_size(size, quantity):
-    """
-    Calculate total size when possible.
-    """
-
-    if size is None or quantity is None:
-        return None
-
-    return round(size * quantity, 3)
-
+# ============================================================
+# URL / IMAGE
+# ============================================================
 
 def build_product_url(product):
-    """
-    Build Tamimi product URL.
-
-    Example:
-    https://shop.tamimimarkets.com/product/<slug>
-    """
-
     slug = clean_text(product.get("slug"))
 
     if not slug:
         return None
 
-    return f"https://shop.tamimimarkets.com/product/{slug}"
+    return f"https://shop.tamimimarkets.com/ar/product/{slug}"
 
 
 def get_image(product, variant):
-    """
-    Get the first available product image.
-    """
+    for source in (variant, product):
+        images = source.get("images") or []
 
-    # Try variant images first
-    if variant:
-        variant_images = variant.get("images") or []
+        if not isinstance(images, list):
+            continue
 
-        if variant_images:
-            return variant_images[0]
+        for image in images:
+            image = clean_text(image)
 
-    # Try product images
-    product_images = product.get("images") or []
-
-    if isinstance(product_images, list) and product_images:
-        return product_images[0]
+            if image:
+                return image
 
     return None
 
 
 # ============================================================
-# LOAD RAW DATA
+# LOAD / TRANSFORM
 # ============================================================
 
 def load_raw_data():
-    """
-    Load Tamimi RAW JSON.
-    """
-
     if not INPUT_FILE.exists():
         raise FileNotFoundError(
             f"RAW file not found:\n{INPUT_FILE}"
         )
 
-    with INPUT_FILE.open("r", encoding="utf-8") as file:
+    with INPUT_FILE.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
         return json.load(file)
 
 
-# ============================================================
-# TRANSFORM
-# ============================================================
-
-def transform(raw_data):
-    """
-    Transform Tamimi RAW data into the same schema
-    used by Danube and BinDawood.
-    """
-
-    products = raw_data.get("hits") or []
-
-    records = []
-
-    for product in products:
-
-        # ----------------------------------------------------
-        # Basic product information
-        # ----------------------------------------------------
-
-        product_name_en = clean_text(product.get("name"))
-
-        if not product_name_en:
-            continue
-
-        product_name_ar = clean_text(
-            product.get("nameAr")
-            or product.get("name_ar")
-            or product.get("arabicName")
-        )
-
-        # If Arabic name is not available,
-        # use English name as fallback.
-        if not product_name_ar:
-            product_name_ar = product_name_en
-
-        # ----------------------------------------------------
-        # Brand
-        # ----------------------------------------------------
-
-        brand_data = product.get("brand")
-
-        if isinstance(brand_data, dict):
-            brand = clean_text(brand_data.get("name"))
-        else:
-            brand = clean_text(brand_data)
-
-        # ----------------------------------------------------
-        # Category
-        # ----------------------------------------------------
-
-        category = clean_text(
-            product.get("_category_key")
-        )
-
-        # ----------------------------------------------------
-        # Variant
-        # ----------------------------------------------------
-
-        variant = get_first_variant(product)
-
-        store_data = get_store_data(variant)
-
-        if not store_data:
-            continue
-
-        # ----------------------------------------------------
-        # Price
-        # ----------------------------------------------------
-
-        mrp = safe_float(
-            store_data.get("mrp")
-        )
-
-        discount = safe_float(
-            store_data.get("discount")
-        )
-
-        if discount is None:
-            discount = 0.0
-
-        price = calculate_price(
-            mrp,
-            discount
-        )
-
-        if price is None:
-            continue
-
-        # ----------------------------------------------------
-        # Size & Unit
-        # ----------------------------------------------------
-
-        size, unit = extract_size_and_unit(
-            variant
-        )
-
-        # ----------------------------------------------------
-        # Quantity
-        # ----------------------------------------------------
-
-        quantity = safe_float(
-            store_data.get("unit")
-        )
-
-        if quantity is None:
-            quantity = 1
-
-        # Convert whole numbers to int
-        if quantity.is_integer():
-            quantity = int(quantity)
-
-        # ----------------------------------------------------
-        # Total Size
-        # ----------------------------------------------------
-
-        total_size = calculate_total_size(
-            size,
-            quantity
-        )
-
-        # ----------------------------------------------------
-        # URL
-        # ----------------------------------------------------
-
-        url = build_product_url(
-            product
-        )
-
-        # ----------------------------------------------------
-        # Image
-        # ----------------------------------------------------
-
-        image = get_image(
-            product,
-            variant
-        )
-
-        # ----------------------------------------------------
-        # Final record
-        # ----------------------------------------------------
-
-        record = {
-            "product_name_ar": product_name_ar,
-            "product_name_en": product_name_en,
-            "store": "Tamimi Markets",
-            "category": category,
-            "price": round(price, 2),
-            "regular_price": round(mrp, 2) if mrp is not None else None,
-            "discount": round(discount, 2),
-            "brand": brand,
-            "size": size,
-            "unit": unit,
-            "quantity": quantity,
-            "total_size": total_size,
-            "url": url,
-            "image": image
-        }
-
-        records.append(record)
-
-    # --------------------------------------------------------
-    # Remove duplicate products
-    # --------------------------------------------------------
-
+def remove_duplicates(records):
     unique_records = []
-
     seen = set()
 
     for record in records:
-
         key = (
             record.get("product_name_en"),
-            record.get("category")
+            record.get("category"),
+            record.get("size"),
+            record.get("unit"),
+            record.get("quantity"),
         )
 
-        if key in seen:
-            continue
-
-        seen.add(key)
-        unique_records.append(record)
+        if key not in seen:
+            seen.add(key)
+            unique_records.append(record)
 
     return unique_records
 
 
+def transform(raw_data):
+    products = raw_data.get("hits") or []
+
+    if not isinstance(products, list):
+        products = []
+
+    records = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        for variant in get_variants(product):
+            original_name_en = get_product_name(
+                product,
+                variant,
+            )
+
+            if not original_name_en:
+                continue
+
+            brand = get_brand(product)
+
+            product_name_en = clean_display_name(
+                original_name_en,
+                brand,
+            )
+
+            product_name_ar = get_arabic_name(
+                product,
+                variant,
+            )
+
+            store_record = choose_store_record(
+                variant
+            )
+
+            price, regular_price, discount = get_price_data(
+                store_record
+            )
+
+            if price is None:
+                continue
+
+            size, unit = extract_size_and_unit(
+                variant
+            )
+
+            quantity = extract_quantity(
+                variant
+            )
+
+            records.append(
+                {
+                    "product_name_ar": product_name_ar,
+                    "product_name_en": product_name_en,
+                    "store": "Tamimi Markets",
+                    "category": clean_text(
+                        product.get("_category_key")
+                    ),
+                    "price": price,
+                    "regular_price": regular_price,
+                    "discount": discount,
+                    "brand": brand,
+                    "size": size,
+                    "unit": unit or "unit",
+                    "quantity": quantity,
+                    "total_size": (
+                        round(size * quantity, 3)
+                        if size is not None
+                        else None
+                    ),
+                    "url": build_product_url(product),
+                    "image": get_image(product, variant),
+                }
+            )
+
+    return remove_duplicates(records)
+
+
 # ============================================================
-# SAVE CLEAN DATA
+# SAVE
 # ============================================================
 
-def save_clean_file(records, raw_data):
-    """
-    Save only tamimi_clean_latest.json
-    using the same wrapper structure as Danube/BinDawood.
-    """
-
+def save_clean_file(records):
     OUTPUT_DIR.mkdir(
         parents=True,
-        exist_ok=True
+        exist_ok=True,
+    )
+
+    timestamp = time.strftime(
+        "%Y%m%d_%H%M%S",
+        time.gmtime(),
     )
 
     categories = {}
 
     for record in records:
-
         category = record.get("category")
 
         if category:
@@ -442,28 +621,36 @@ def save_clean_file(records, raw_data):
 
     clean_data = {
         "store": "Tamimi Markets",
-        "generated_at": raw_data.get(
-            "fetched_at",
-            datetime.now(timezone.utc).isoformat()
+        "generated_at": time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ",
+            time.gmtime(),
         ),
         "categories": categories,
         "records_count": len(records),
-        "records": records
+        "records": records,
     }
 
-    with OUTPUT_FILE.open(
-        "w",
-        encoding="utf-8"
-    ) as file:
+    timestamped_file = (
+        OUTPUT_DIR
+        / f"tamimi_clean_{timestamp}.json"
+    )
 
-        json.dump(
-            clean_data,
-            file,
-            ensure_ascii=False,
-            indent=2
+    serialized = json.dumps(
+        clean_data,
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    for output_file in (
+        timestamped_file,
+        LATEST_OUTPUT_FILE,
+    ):
+        output_file.write_text(
+            serialized,
+            encoding="utf-8",
         )
 
-    return clean_data
+    return timestamped_file
 
 
 # ============================================================
@@ -471,51 +658,38 @@ def save_clean_file(records, raw_data):
 # ============================================================
 
 def main():
-
     print("=" * 60)
     print("TAMIMI DATA TRANSFORMATION")
     print("=" * 60)
 
-    print(f"RAW input:")
-    print(INPUT_FILE)
-
-    print()
-
     raw_data = load_raw_data()
+    records = transform(raw_data)
+    output_file = save_clean_file(records)
 
-    records = transform(
-        raw_data
+    raw_hits = raw_data.get("hits") or []
+
+    brands_found = sum(
+        record.get("brand") is not None
+        for record in records
     )
 
-    clean_data = save_clean_file(
-        records,
-        raw_data
+    sizes_found = sum(
+        record.get("size") is not None
+        for record in records
     )
 
-    print()
-    print("TRANSFORMATION COMPLETE")
-    print("-" * 60)
-
-    print(
-        f"RAW products: {len(raw_data.get('hits') or [])}"
+    deals_found = sum(
+        (record.get("discount") or 0) > 0
+        for record in records
     )
 
-    print(
-        f"CLEAN records: {clean_data['records_count']}"
-    )
-
-    print()
-    print("CATEGORIES:")
-
-    for category, count in clean_data["categories"].items():
-        print(
-            f"  {category}: {count}"
-        )
-
-    print()
-    print("OUTPUT:")
-    print(OUTPUT_FILE)
-
+    print(f"Raw products: {len(raw_hits)}")
+    print(f"Clean records: {len(records)}")
+    print(f"Brands found: {brands_found}/{len(records)}")
+    print(f"Sizes found: {sizes_found}/{len(records)}")
+    print(f"Products on discount: {deals_found}/{len(records)}")
+    print(f"Timestamped: {output_file}")
+    print(f"Latest: {LATEST_OUTPUT_FILE}")
     print("=" * 60)
 
 
