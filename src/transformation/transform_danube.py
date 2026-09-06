@@ -231,6 +231,19 @@ def safe_float(value: Any) -> float | None:
         return None
 
 
+def extract_barcode_from_image(image_url: str | None) -> str | None:
+    """Extract a numeric barcode-like identifier from the product image URL."""
+    if not image_url:
+        return None
+
+    match = re.search(
+        r"/product/(\d+)\.(?:jpg|jpeg|png|webp)(?:\?.*)?$",
+        image_url,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
 def normalize_unit(unit: str | None) -> str | None:
     if not unit:
         return None
@@ -606,6 +619,8 @@ def transform(df: pd.DataFrame) -> pd.DataFrame:
                 product.get("original_price")
             )
 
+        image_url = clean_text(product.get("image")) or None
+
         if price is None:
             continue
 
@@ -640,9 +655,9 @@ def transform(df: pd.DataFrame) -> pd.DataFrame:
                     else None
                 ),
                 "url": build_product_url(row),
-                "image": clean_text(
-                    product.get("image")
-                ) or None,
+                "barcode": extract_barcode_from_image(image_url),
+                "image_url": image_url,
+                "image": image_url,
             }
         )
 
@@ -660,6 +675,8 @@ def transform(df: pd.DataFrame) -> pd.DataFrame:
         "quantity",
         "total_size",
         "url",
+        "barcode",
+        "image_url",
         "image",
     ]
 

@@ -5,6 +5,7 @@ import re
 import time
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 
 # ============================================================
@@ -53,6 +54,63 @@ def safe_float(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def normalize_barcode(value: Any) -> str | None:
+    """Clean a barcode and keep standard GTIN/UPC lengths only."""
+    if value is None:
+        return None
+
+    barcode = re.sub(r"\D", "", str(value))
+
+    if len(barcode) in {12, 13, 14}:
+        return barcode
+
+    return None
+
+
+def normalize_barcode_candidates(barcodes: list[Any] | None) -> list[str]:
+    if not isinstance(barcodes, list):
+        return []
+
+    candidates = []
+    for value in barcodes:
+        normalized = normalize_barcode(value)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    return candidates
+
+
+def is_valid_gtin(barcode: str | None) -> bool:
+    """Validate the check digit for GTIN-12, EAN-13, or GTIN-14."""
+    if (
+        not barcode
+        or not barcode.isdigit()
+        or len(barcode) not in {12, 13, 14}
+    ):
+        return False
+
+    payload = barcode[:-1]
+    supplied_check_digit = int(barcode[-1])
+
+    total = 0
+    for position, digit in enumerate(reversed(payload), start=1):
+        total += int(digit) * (3 if position % 2 == 1 else 1)
+
+    expected_check_digit = (10 - (total % 10)) % 10
+    return supplied_check_digit == expected_check_digit
+
+
+def extract_best_barcode(barcodes: list[Any] | None) -> str | None:
+    """Prefer a valid GTIN, but retain a usable source value as fallback."""
+    candidates = normalize_barcode_candidates(barcodes)
+
+    for barcode in candidates:
+        if is_valid_gtin(barcode):
+            return barcode
+
+    return candidates[0] if candidates else None
 
 
 def normalize_unit(unit):
@@ -566,8 +624,19 @@ def transform(raw_data):
                 variant
             )
 
+            barcode = extract_best_barcode(
+                variant.get("barcodes")
+            )
+            barcode_candidates = normalize_barcode_candidates(
+                variant.get("barcodes")
+            )
+            image_url = get_image(product, variant)
+
             records.append(
                 {
+                    "tamimi_product_id": product.get("id"),
+                    "tamimi_variant_id": variant.get("id"),
+                    "tamimi_client_item_id": variant.get("clientItemId"),
                     "product_name_ar": product_name_ar,
                     "product_name_en": product_name_en,
                     "store": "Tamimi Markets",
@@ -586,8 +655,13 @@ def transform(raw_data):
                         if size is not None
                         else None
                     ),
+                    "barcode": barcode,
+                    "barcode_candidates": barcode_candidates,
+                    "barcode_source": "variant.barcodes",
+                    "barcode_valid": is_valid_gtin(barcode),
                     "url": build_product_url(product),
-                    "image": get_image(product, variant),
+                    "image_url": image_url,
+                    "image": image_url,
                 }
             )
 

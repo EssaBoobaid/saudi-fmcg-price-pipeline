@@ -486,6 +486,19 @@ def extract_image(product):
     return None
 
 
+def extract_barcode_from_image(image_url: str | None) -> str | None:
+    """Extract a numeric barcode-like identifier from the product image URL."""
+    if not image_url:
+        return None
+
+    match = re.search(
+        r"/product/(\d+)\.(?:jpg|jpeg|png|webp)(?:\?.*)?$",
+        image_url,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
 # ============================================================
 # TRANSFORM
 # ============================================================
@@ -536,6 +549,8 @@ def transform_product(product):
     if price is None:
         return None
 
+    image_url = extract_image(product)
+
     return {
         "product_name_ar": product_name_ar,
         "product_name_en": product_name_en,
@@ -553,7 +568,9 @@ def transform_product(product):
         "quantity": quantity,
         "total_size": round(size * quantity, 3) if size is not None else None,
         "url": build_url(product),
-        "image": extract_image(product),
+        "barcode": extract_barcode_from_image(image_url),
+        "image_url": image_url,
+        "image": image_url,
     }
 
 
